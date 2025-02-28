@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Musician Tycoon</title>
+    <style>
+        :root {
+            --primary-color: #4a4a9c;
+            --secondary-color: #7676c0;
+            --accent-color: #ffcc00;
+            --background-color: #f5f5f5;
+            --text-color: #333;
+            --border-color: #ddd;
+            --success-color: #4caf50;
+            --danger-color: #f44336;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--background-color);
+            padding: 10px;
+            max-width: 100%;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 10px;
+        }
+
+        h1, h2, h3 {
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 5px;
+            margin-top: 15px;
+        }
+
+        h3 {
+            font-size: 1.2rem;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.2s;
+            width: 100%;
+            text-align: center;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        button:hover:not(:disabled) {
+            background-color: var(--secondary-color);
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .can-tour {
+            background-color: var(--success-color);
+        }
+
+        .can-tour:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+
+        small {
+            display: block;
+            margin-top: 2px;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        .section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .section-header h2 {
+            margin: 0;
+            flex-grow: 1;
+        }
+
+        .toggle-btn {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0 10px;
+            width: auto;
+        }
+
+        .section-content {
+            margin-top: 10px;
+        }
+
+        .collapsed .section-content {
+            display: none;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+        }
+
+        @media (min-width: 768px) {
+            .grid-container {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .actions {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            
+            button {
+                font-size: 1rem;
+            }
+        }
+
+        .upgrades {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .store-btn, .genre-btn, .band-btn {
+            border: 1px solid var(--border-color);
+            background-color: white;
+            color: var(--text-color);
+            padding: 12px;
+            position: relative;
+            text-align: left;
+        }
+
+        .store-btn:not(:disabled):hover, 
+        .genre-btn:not(:disabled):hover, 
+        .band-btn:not(:disabled):hover {
+            background-color: #f0f0f0;
+            color: var(--primary-color);
+        }
+
+        .upgrade-level {
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-top: 5px;
+        }
+
+        .genre-effects {
+            margin-top: 8px;
+            font-size: 0.8rem;
+        }
+
+        .genre-tradeoffs {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .genre-tradeoffs li {
+            margin: 2px 0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .genre-tradeoffs .positive {
+            background-color: rgba(76, 175, 80, 0.1);
+            color: #2e7d32;
+        }
+
+        .genre-tradeoffs .negative {
+            background-color: rgba(244, 67, 54, 0.1);
+            color: #d32f2f;
+        }
+
+        .genres-container, .band-members-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+
+        .genre-btn.active {
+            background-color: var(--accent-color);
+            color: var(--text-color);
+            font-weight: bold;
+        }
+
+        .band-btn.hired, .disabled {
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+
+        .collab-container {
+            background-color: #fcefb0;
+            border: 2px solid var(--accent-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .collab-container.hidden {
+            display: none;
+        }
+
+        .collab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .collab-timer {
+            font-weight: bold;
+            color: var(--danger-color);
+            margin-top: 5px;
+        }
+
+        .notifications {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: calc(100% - 40px);
+            max-width: 300px;
+            z-index: 1000;
+        }
+
+        .notification {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            animation: fadeIn 0.3s, fadeOut 0.5s 9.5s forwards;
+            opacity: 0.9;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 0.9; transform: translateY(0); }
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 0.9; }
+            to { opacity: 0; transform: translateY(20px); }
+        }
+
+        .reset-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .reset-btn {
+            background-color: var(--danger-color);
+            width: auto;
+            padding: 8px 15px;
+            font-size: 0.8rem;
+        }
+
+        .reset-btn:hover {
+            background-color: #d32f2f;
+        }
+
+        .sold-out {
+            display: inline-block;
+            background-color: var(--danger-color);
+            color: white;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            margin-left: 5px;
+        }
+
+        /* Mobile-specific adjustments */
+        @media (max-width: 480px) {
+            body {
+                padding: 5px;
+            }
+            
+            .container {
+                padding: 5px;
+            }
+            
+            h1 {
+                font-size: 1.5rem;
+            }
+            
+            h2 {
+                font-size: 1.2rem;
+            }
+            
+            .section {
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+            
+            button {
+                padding: 12px 10px;
+                font-size: 0.9rem;
+            }
+            
+            .stats {
+                gap: 5px;
+            }
+            
+            .stat-item {
+                padding: 8px;
+            }
+            
+            .stat-value {
+                font-size: 1rem;
+            }
+            
+            .notification {
+                font-size: 0.9rem;
+                max-width: calc(100% - 20px);
+                right: 10px;
+                bottom: 10px;
+            }
+        }
+        
+        /* Fix for iPhone tap highlight */
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Musician Tycoon</h1>
+        
+        <div class="grid-container">
+            <div class="left-column">
+                <div class="stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Experience</span>
+                        <span id="experience" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Albums</span>
+                        <span id="albums" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Money</span>
+                        <span id="money" class="stat-value">$0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Fame</span>
+                        <span id="fame" class="stat-value">0</span>
+                    </div>
+                </div>
+                
+                <div class="collab-container" id="collab-container">
+                    <p id="collab-description">A famous artist wants to collaborate!</p>
+                    <p id="collab-timer" class="collab-timer">Time left: 30s</p>
+                    <div class="collab-buttons">
+                        <button id="accept-collab">Accept</button>
+                        <button id="decline-collab">Decline</button>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <h2>Current Genre: <span id="current-genre">Folk</span></h2>
+                </div>
+                
+                <div class="actions">
+                    <button id="practice">Practice</button>
+                    <button id="record-album" disabled>Record Album (100 XP)</button>
+                    <button id="go-on-tour" disabled>Go on Tour (5 Albums & $5,000)</button>
+                </div>
+                
+                <div id="band-members-section" class="section">
+                    <div class="section-header">
+                        <h2>Band Members</h2>
+                        <button class="toggle-btn">▼</button>
+                    </div>
+                    <div class="section-content">
+                        <p>Hire musicians to help your career.</p>
+                        <div class="band-members-container">
+                            <!-- Band members will be added here by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="right-column">
+                <div id="store-section" class="section">
+                    <div class="section-header">
+                        <h2>Store</h2>
+                        <button class="toggle-btn">▼</button>
+                    </div>
+                    <div class="section-content">
+                        <div class="upgrades">
+                            <!-- Store items will be added here by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="genres-section" class="section">
+                    <div class="section-header">
+                        <h2>Genres</h2>
+                        <button class="toggle-btn">▼</button>
+                    </div>
+                    <div class="section-content">
+                        <div class="genres-container">
+                            <!-- Genres will be added here by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="stats-section" class="section">
+                    <div class="section-header">
+                        <h2>Stats</h2>
+                        <button class="toggle-btn">►</button>
+                    </div>
+                    <div class="section-content" style="display: none;">
+                        <p>XP per Practice: <span id="xp-per-practice">1</span></p>
+                        <p>Album Value: $<span id="album-value">5</span></p>
+                        <p>Sales per Second: $<span id="sales-per-second">0</span></p>
+                        <p>Total Albums Sold: <span id="total-albums-sold">0</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="reset-container">
+            <button id="reset-game" class="reset-btn">Reset Game</button>
+        </div>
+    </div>
+    
+    <div id="notifications" class="notifications"></div>
+    
+    <script src="script.js"></script>
+</body>
+</html> 
