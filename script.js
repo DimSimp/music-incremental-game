@@ -280,49 +280,56 @@ function init() {
     
     // Fix store interactivity
     fixStoreInteractivity();
-
-    // Apply initial genre effects
-    applyGenreEffects();
 }
 
 // Game actions
 function practice() {
+    // Add XP
     game.experience += game.xpPerPractice;
-    updateUI();
     
-    // Trigger special events based on XP milestones
-    checkXpMilestones();
+    // Check if this is the first time reaching enough XP for an album
+    const canRecordAlbum = game.experience >= game.currentAlbumCost;
+    if (canRecordAlbum && !domElements.recordAlbumBtn.classList.contains('can-record')) {
+        addNotification("You've gained enough experience to record your first album!");
+        domElements.recordAlbumBtn.classList.add('can-record');
+    }
+    
+    // Always update UI at the end after all checks
+    updateUI();
 }
 
 function recordAlbum() {
     if (game.experience >= game.currentAlbumCost) {
-        // Get current genre data for fame modifier
-        const genreData = game.genreDefinitions[game.currentGenre] || game.fusionGenres[game.currentGenre];
-        const fameModifier = genreData ? (genreData.fameModifier || 1) : 1;
-        
         game.experience -= game.currentAlbumCost;
         game.albums++;
         
-        // Apply fame gain with genre modifier
-        game.fame += 10 * fameModifier;
+        // Increase the cost for the next album
+        game.currentAlbumCost = Math.floor(game.baseAlbumCost * Math.pow(game.albumCostMultiplier, game.albums));
         
-        // Update album cost for next album
-        game.currentAlbumCost = Math.floor(game.baseAlbumCost * 
-            Math.pow(game.albumCostMultiplier, game.albums));
+        // Remove the can-record class since we need to save up again
+        domElements.recordAlbumBtn.classList.remove('can-record');
+        
+        // Update other game systems
+        updateSalesRate();
         
         updateUI();
         checkTourRequirements();
         
         // Check for milestones
-        if (game.albums === 1) {
-            addNotification("Congratulations on your first album! You're starting to gain fans.");
-        } else if (game.albums === 5) {
-            addNotification("You've released 5 albums! Your music is spreading.");
-            unlockRock();
-        } else if (game.albums === 10) {
-            addNotification("10 albums released! You're becoming well-known.");
-            checkDrummer();
+        if (game.albums >= 3 && !game.hasBetterGuitar && domElements.betterGuitarBtn.disabled) {
+            domElements.betterGuitarBtn.disabled = false;
+            addNotification("New in store: Better Guitar! Improve your practice efficiency.");
         }
+        
+        if (game.albums >= 5 && !game.hasRecordingEquipment && domElements.recordingEquipmentBtn.disabled) {
+            domElements.recordingEquipmentBtn.disabled = false;
+            addNotification("New in store: Recording Equipment! Increase the value of your albums.");
+        }
+        
+        // Genre unlock checks
+        checkGenreUnlocks();
+        
+        addNotification(`You've recorded album #${game.albums}!`);
     }
 }
 
@@ -528,25 +535,12 @@ function gameLoop() {
 
 // Helper functions
 function updateSalesRate() {
-    // Get current genre data
-    const genreData = game.genreDefinitions[game.currentGenre] || game.fusionGenres[game.currentGenre];
-    const salesRateModifier = genreData ? (genreData.salesRateModifier || 1) : 1;
+    // Base sales rate is albums * album value / 5 per second
+    const baseRate = (game.albums * game.albumValue) / 5;
     
-    // Calculate base rate
-    let newRate = 0;
-    if (game.albums > 0) {
-        newRate = 0.1 * (1 + (0.25 * game.upgradeCounts.marketing));
-    }
-    
-    // Apply tour and collab bonuses
-    newRate *= (1 + (0.5 * game.tourLevel));
-    newRate *= game.collabMultiplier;
-    
-    // Apply genre modifier
-    newRate *= salesRateModifier;
-    
-    game.salesPerSecond = newRate * game.albumValue;
-    domElements.salesPerSecond.textContent = game.salesPerSecond.toFixed(1);
+    // Apply multipliers
+    const genreMultiplier = game.genreMultipliers[game.currentGenre] || 1;
+    game.salesPerSecond = baseRate * game.salesMultiplier * game.collabMultiplier * genreMultiplier;
 }
 
 function addNotification(message) {
@@ -570,9 +564,9 @@ function updateUI() {
     domElements.fame.textContent = Math.floor(game.fame);
     
     // Update stats
-    domElements.xpPerPractice.textContent = game.xpPerPractice.toFixed(1);
-    domElements.albumValue.textContent = game.albumValue.toFixed(1);
-    domElements.salesPerSecond.textContent = game.salesPerSecond.toFixed(1);
+    domElements.xpPerPractice.textContent = game.xpPerPractice;
+    domElements.albumValue.textContent = game.albumValue;
+    domElements.salesPerSecond.textContent = game.salesPerSecond.toFixed(2);
     domElements.totalAlbumsSold.textContent = Math.floor(game.totalAlbumsSold);
     
     // Use consistent approach for all button states
@@ -733,37 +727,19 @@ Are you sure you want to switch?`)) {
     }
 }
 
-// Enhance applyGenreEffects to integrate all genre bonuses
+// Add helper function to apply genre effects
 function applyGenreEffects() {
     // Get current genre data
     const genreData = game.genreDefinitions[game.currentGenre] || game.fusionGenres[game.currentGenre];
     if (!genreData) return;
     
-    // Apply album cost modifier
+    // Apply album cost modifier (affects next album cost calculation)
     const baseAlbumCost = game.baseAlbumCost;
     game.currentAlbumCost = Math.floor(baseAlbumCost * genreData.albumCostModifier * 
                                      Math.pow(game.albumCostMultiplier, game.albums));
     
-    // Apply XP modifier to practice
-    const baseXpPerPractice = 1 * (1 + game.upgradeCounts.betterGuitar);
-    game.xpPerPractice = baseXpPerPractice * (genreData.xpModifier || 1);
-    
-    // Apply album value modifier
-    const baseAlbumValue = 5 + game.upgradeCounts.recordingEquipment;
-    if (game.hasProducer) {
-        game.albumValue = baseAlbumValue * 2 * (genreData.albumValueModifier || 1);
-    } else {
-        game.albumValue = baseAlbumValue * (genreData.albumValueModifier || 1);
-    }
-    
-    // Fame modifier will be applied when fame is gained
-    
     // Update sales rate to account for genre effects
     updateSalesRate();
-    
-    // Update UI
-    domElements.xpPerPractice.textContent = game.xpPerPractice.toFixed(1);
-    domElements.albumValue.textContent = game.albumValue.toFixed(1);
 }
 
 // Helper to get human-readable text about genre trade-offs
