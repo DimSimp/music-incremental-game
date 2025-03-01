@@ -4,7 +4,12 @@ const game = {
     albums: 0,
     money: 0,
     fame: 0,
+    fans: 0,
     totalAlbumsSold: 0,
+    
+    // Social Media
+    socialMediaLevel: 0,
+    socialMediaCost: 100,
     
     // Stats
     xpPerPractice: 1,
@@ -109,15 +114,56 @@ const game = {
     // Dynamic scaling for upgrades
     upgradeCostScaling: 0.05, // How much the multiplier increases per purchase
     
-    // Prestige system (we'll implement this later)
+    // Platinum prestige system
+    platinumPoints: 0,
+    platinumMultiplier: 1,
+    lifetimePlatinumPoints: 0,
     prestigeCount: 0,
-    platinumRecords: 0,
-    prestigeMultipliers: {
-        xpGain: 1,
-        moneyGain: 1,
-        fameGain: 1
+    
+    // Platinum upgrades
+    platinumUpgrades: {
+        fanRetention: 0,  // Keep a % of fans when prestiging
+        earlyBird: 0,     // Start with some money and albums
+        goldenTouch: 0,   // Increase all money gains
+        fastLearner: 0,   // Increase XP gain
+        hitMaker: 0,      // Increase album value
+        tourManager: 0    // Better tour rewards
     },
-
+    
+    // Platinum upgrade costs and effects
+    platinumUpgradeDefinitions: {
+        fanRetention: {
+            baseEffect: 0.05,  // 5% fans retained per level
+            baseCost: 3,
+            costMultiplier: 1.5
+        },
+        earlyBird: {
+            baseEffect: 1,     // 1 album and $1000 per level
+            baseCost: 2,
+            costMultiplier: 2
+        },
+        goldenTouch: {
+            baseEffect: 0.1,   // 10% more money per level
+            baseCost: 5,
+            costMultiplier: 1.8
+        },
+        fastLearner: {
+            baseEffect: 0.15,  // 15% more XP per level
+            baseCost: 4,
+            costMultiplier: 1.7
+        },
+        hitMaker: {
+            baseEffect: 0.2,   // 20% higher album value per level
+            baseCost: 6,
+            costMultiplier: 1.9
+        },
+        tourManager: {
+            baseEffect: 0.25,  // 25% better tour rewards per level
+            baseCost: 5,
+            costMultiplier: 1.8
+        }
+    },
+    
     // Enhanced genre system with pros and cons
     genreDefinitions: {
         "Folk": {
@@ -244,6 +290,9 @@ function init() {
     domElements.acceptCollabBtn.addEventListener('click', acceptCollab);
     domElements.declineCollabBtn.addEventListener('click', declineCollab);
     
+    // Add platinum styles
+    addPlatinumStyles();
+    
     // Set game loops
     game.gameLoopIntervalId = setInterval(gameLoop, 1000);
     game.autoSaveIntervalId = setInterval(saveGame, 30000);
@@ -251,6 +300,11 @@ function init() {
     
     // Load saved game
     loadGame();
+    
+    // Apply platinum bonuses if any
+    if (game.lifetimePlatinumPoints > 0) {
+        applyPlatinumBonuses();
+    }
     
     // Update UI
     updateUI();
@@ -280,12 +334,44 @@ function init() {
     
     // Fix store interactivity
     fixStoreInteractivity();
+    
+    // Initialize platinum shop earlier - once player has at least 1 album and some fame
+    if (game.albums >= 1 && game.fame >= 100) {
+        showPlatinumAvailability();
+    }
+    
+    // Add "Make a post online" button to the actions section - Move this to the end of init to ensure all DOM elements exist
+    setTimeout(() => {
+        const makePostButton = document.getElementById('makePostButton');
+        if (makePostButton) {
+            console.log("Found Make Post button, attaching click handler");
+            makePostButton.addEventListener('click', function() {
+                console.log("Make Post button clicked");
+                makePost();
+            });
+        } else {
+            console.log("Make Post button not found in DOM");
+        }
+    }, 100); // Small delay to ensure DOM is fully loaded
 }
 
 // Game actions
 function practice() {
-    // Add XP
-    game.experience += game.xpPerPractice;
+    // Calculate base XP gain
+    let xpGain = game.xpPerPractice;
+    
+    // Apply Fast Learner platinum upgrade if purchased
+    if (game.platinumUpgrades.fastLearner > 0) {
+        const fastLearnerBonus = 1 + (game.platinumUpgrades.fastLearner * 
+                                game.platinumUpgradeDefinitions.fastLearner.baseEffect);
+        xpGain *= fastLearnerBonus;
+    }
+    
+    // Apply platinum multiplier to XP gain
+    xpGain *= game.platinumMultiplier;
+    
+    // Add XP (rounded down to prevent weird fractional XP)
+    game.experience += Math.floor(xpGain);
     
     // Check if this is the first time reaching enough XP for an album
     const canRecordAlbum = game.experience >= game.currentAlbumCost;
@@ -312,22 +398,24 @@ function recordAlbum() {
         // Update other game systems
         updateSalesRate();
         
-        updateUI();
-        checkTourRequirements();
-        
-        // Check for milestones
+        // Check for milestones BEFORE updating UI
         if (game.albums >= 3 && !game.hasBetterGuitar && domElements.betterGuitarBtn.disabled) {
-            domElements.betterGuitarBtn.disabled = false;
+            // Only show notification that it's available, don't enable the button here
+            // The updateUI function will handle enabling/disabling based on money
             addNotification("New in store: Better Guitar! Improve your practice efficiency.");
         }
         
         if (game.albums >= 5 && !game.hasRecordingEquipment && domElements.recordingEquipmentBtn.disabled) {
-            domElements.recordingEquipmentBtn.disabled = false;
+            // Only show notification that it's available, don't enable the button here
             addNotification("New in store: Recording Equipment! Increase the value of your albums.");
         }
         
         // Genre unlock checks
         checkGenreUnlocks();
+        
+        // Now update UI after notifications but before the album notification
+        updateUI();
+        checkTourRequirements();
         
         addNotification(`You've recorded album #${game.albums}!`);
     }
@@ -335,17 +423,34 @@ function recordAlbum() {
 
 function goOnTour() {
     // Check if the player meets requirements without subtracting albums
-    if (game.albums >= game.currentTourAlbumCost && game.money >= game.currentTourMoneyCost) {
+    if (game.albums >= game.currentTourAlbumCost && 
+        game.money >= game.currentTourMoneyCost && 
+        game.upgradeCounts.producer > 0) {
+        
         // Only subtract money, not albums (albums are just a requirement)
         game.money -= game.currentTourMoneyCost;
         game.tourLevel++;
         
-        // Calculate fame gain and tour profit based on tour level
-        const fameGain = 1000 * Math.pow(1.2, game.tourLevel - 1);
-        game.fame += fameGain;
+        // Calculate base fame gain and tour profit
+        let fameGain = 1000 * Math.pow(1.2, game.tourLevel - 1);
         
-        // Tours give an immediate boost in sales, scale with fame and tour level
-        const tourProfit = 10000 * Math.sqrt(game.fame / 1000) * Math.pow(1.1, game.tourLevel - 1);
+        // Calculate tour profit based on fame and tour level
+        let tourProfit = 10000 * Math.sqrt(game.fame / 1000) * Math.pow(1.1, game.tourLevel - 1);
+        
+        // Apply Tour Manager platinum upgrade if purchased
+        if (game.platinumUpgrades.tourManager > 0) {
+            const tourManagerBonus = 1 + (game.platinumUpgrades.tourManager * 
+                                    game.platinumUpgradeDefinitions.tourManager.baseEffect);
+            fameGain *= tourManagerBonus;
+            tourProfit *= tourManagerBonus;
+        }
+        
+        // Apply platinum multiplier to all gains
+        fameGain *= game.platinumMultiplier;
+        tourProfit *= game.platinumMultiplier;
+        
+        // Add gains to player stats
+        game.fame += fameGain;
         game.money += tourProfit;
         
         // Increase the cost for the next tour
@@ -354,6 +459,9 @@ function goOnTour() {
         
         updateSalesRate();
         updateUI();
+        
+        // Explicitly check tour requirements after a tour is completed
+        checkTourRequirements();
         
         addNotification(`You went on tour #${game.tourLevel} and gained ${Math.floor(fameGain)} fans! Tour profit: $${Math.floor(tourProfit)}`);
     }
@@ -429,6 +537,8 @@ function buyUpgrade(upgrade) {
                 if (game.upgradeCounts[upgrade] === 1) {
                     game.hasProducer = true;
                     addNotification("You hired a producer! Album value increased by 50%.");
+                    // Check tour requirements since purchasing a producer can enable touring
+                    checkTourRequirements();
                 } else {
                     addNotification(`Producer upgraded! Album value increased by another 50%.`);
                 }
@@ -527,7 +637,7 @@ function gameLoop() {
         checkTourRequirements();
         
         // Enable tour button if conditions met
-        if (game.albums >= 5 && game.money >= 5000 && game.hasProducer && domElements.goOnTourBtn.disabled) {
+        if (game.albums >= 5 && game.money >= 5000 && game.upgradeCounts.producer > 0 && domElements.goOnTourBtn.disabled) {
             domElements.goOnTourBtn.disabled = false;
         }
     }
@@ -535,12 +645,32 @@ function gameLoop() {
 
 // Helper functions
 function updateSalesRate() {
-    // Base sales rate is albums * album value / 5 per second
-    const baseRate = (game.albums * game.albumValue) / 5;
+    // Base sales rate calculation
+    let salesRate = game.albums * 0.1;
     
-    // Apply multipliers
-    const genreMultiplier = game.genreMultipliers[game.currentGenre] || 1;
-    game.salesPerSecond = baseRate * game.salesMultiplier * game.collabMultiplier * genreMultiplier;
+    // Apply multipliers from upgrades
+    salesRate *= game.salesMultiplier;
+    
+    // Apply fan multiplier (1% per fan)
+    const fanMultiplier = 1 + (game.fans / 100);
+    salesRate *= fanMultiplier;
+    
+    // Set the sales rate
+    game.salesPerSecond = salesRate;
+    
+    // Calculate fan gain
+    let fanGainRate = salesRate * 0.05;
+    
+    // Apply social media boost (1% per level)
+    const socialMediaBoost = 1 + (game.socialMediaLevel * 0.01);
+    fanGainRate *= socialMediaBoost;
+    
+    // Add fans
+    game.fans += fanGainRate;
+    
+    // Update money based on sales
+    game.money += salesRate * game.albumValue;
+    game.totalAlbumsSold += salesRate;
 }
 
 function addNotification(message) {
@@ -575,7 +705,7 @@ function updateUI() {
     
     const canGoOnTour = game.albums >= game.currentTourAlbumCost && 
                         game.money >= game.currentTourMoneyCost && 
-                        game.hasProducer;
+                        game.upgradeCounts.producer > 0;
     domElements.goOnTourBtn.disabled = !canGoOnTour;
     
     // Add or remove can-tour class based on whether ALL requirements are met
@@ -616,14 +746,55 @@ function updateUI() {
 
     // Update genres
     updateGenres();
+    
+    // Check and update platinum availability
+    // Show platinum section much earlier - once player has at least 1 album and some fame
+    if (game.albums >= 1 && game.fame >= 100) {
+        showPlatinumAvailability();
+    }
+    
+    // Update social media button state
+    const makePostButton = document.getElementById('makePostButton');
+    if (makePostButton) {
+        makePostButton.innerHTML = `Make a post online (${Math.floor(game.socialMediaCost)} XP)`;
+        makePostButton.disabled = game.experience < game.socialMediaCost;
+        makePostButton.title = `Current level: ${game.socialMediaLevel}\nFan gain boost: +${game.socialMediaLevel}%`;
+        
+        // Ensure proper styling for the button
+        if (game.experience < game.socialMediaCost) {
+            makePostButton.classList.add('disabled');
+        } else {
+            makePostButton.classList.remove('disabled');
+        }
+        
+        // Re-attach click handler to ensure it works
+        makePostButton.onclick = makePost;
+    }
+    
+    // Update stats display to include social media info
+    const statsContainer = document.getElementById('stats');
+    if (statsContainer) {
+        // ... existing code ...
+        
+        // Add or update social media info in stats
+        const socialMediaInfo = document.getElementById('socialMediaInfo') || document.createElement('p');
+        socialMediaInfo.id = 'socialMediaInfo';
+        socialMediaInfo.innerHTML = `Social Media Level: ${game.socialMediaLevel} (+${game.socialMediaLevel}% fan gain)`;
+        if (!document.getElementById('socialMediaInfo')) {
+            statsContainer.appendChild(socialMediaInfo);
+        }
+    }
 }
 
 // Add method to check tour requirements after various actions
 function checkTourRequirements() {
     const canGoOnTour = game.albums >= game.currentTourAlbumCost && 
                         game.money >= game.currentTourMoneyCost && 
-                        game.hasProducer;
+                        game.upgradeCounts.producer > 0;
                         
+    // Update both the CSS class and the disabled property
+    domElements.goOnTourBtn.disabled = !canGoOnTour;
+    
     if (canGoOnTour && !domElements.goOnTourBtn.classList.contains('can-tour')) {
         domElements.goOnTourBtn.classList.add('can-tour');
         addNotification("You can now go on tour!");
@@ -977,7 +1148,10 @@ function resetGame() {
             albums: 0,
             money: 0,
             fame: 0,
+            fans: 0,
             totalAlbumsSold: 0,
+            socialMediaLevel: 0,
+            socialMediaCost: 100,
             xpPerPractice: 1,
             albumValue: 5,
             salesPerSecond: 0,
@@ -1029,8 +1203,7 @@ function resetGame() {
             },
             upgradeCostMultiplier: 1.8,
             autoPracticeRate: 1,
-            hasMetronome: false,
-            metronomeBaseCost: 500,
+            hasMetronome: false
         });
         
         // Restart intervals
@@ -1118,81 +1291,525 @@ function buyMetronome() {
     }
 }
 
-// Create a dedicated function to start auto-practice
-function startAutoPractice() {
-    // Clear any existing interval first to prevent duplicates
-    if (game.autoPracticeIntervalId) {
-        clearInterval(game.autoPracticeIntervalId);
+// Add a function to calculate platinum points based on fame
+function calculatePlatinumPoints() {
+    // Base formula: square root of fame, divided by 100, rounded down
+    // This means 10,000 fans = 1 platinum point, 40,000 fans = 2 points, 90,000 fans = 3 points, etc.
+    // The square root ensures diminishing returns but still rewards higher fame
+    const basePoints = Math.floor(Math.sqrt(game.fame) / 10);
+    
+    // Apply a bonus based on number of albums produced and tour level
+    // This encourages players to do more than just accumulate fans
+    const albumsBonus = Math.floor(game.albums / 50);
+    const tourBonus = game.tourLevel;
+    
+    // Minimum of 1 point if you have at least some fame
+    return Math.max(1, basePoints + albumsBonus + tourBonus);
+}
+
+// Function to show platinum availability
+function showPlatinumAvailability() {
+    // Create the platinum section if it doesn't exist
+    let platinumSection = document.getElementById('platinum-section');
+    
+    if (!platinumSection) {
+        // Create the section
+        platinumSection = document.createElement('div');
+        platinumSection.id = 'platinum-section';
+        platinumSection.className = 'platinum-section';
+        
+        // Add heading and description
+        platinumSection.innerHTML = `
+            <div class="section-header">
+                <h2>Platinum Records</h2>
+                <button class="toggle-btn">▼</button>
+            </div>
+            <div class="section-content">
+                <p class="platinum-description">Go Platinum to reset your career but earn permanent benefits!</p>
+                <div class="platinum-info">
+                    <p>Current Platinum Points: <span id="platinum-points">0</span></p>
+                    <p>Lifetime Platinum Points: <span id="lifetime-platinum">0</span></p>
+                    <p>Platinum Multiplier: <span id="platinum-multiplier">1x</span></p>
+                </div>
+                <div class="platinum-actions">
+                    <button id="go-platinum" class="platinum-btn">Go Platinum (Earn <span id="potential-platinum">0</span> Points)</button>
+                    <button id="open-platinum-shop" class="platinum-shop-btn">Platinum Shop</button>
+                </div>
+                <div id="platinum-shop" class="platinum-shop hidden"></div>
+            </div>
+        `;
+        
+        // Find the best place to insert the platinum section
+        let inserted = false;
+        
+        // Try inserting after stats section
+        const statsSection = document.getElementById('stats-section');
+        if (statsSection) {
+            statsSection.parentNode.insertBefore(platinumSection, statsSection.nextSibling);
+            inserted = true;
+        }
+        
+        // Try inserting after band members if stats not found
+        if (!inserted) {
+            const bandMembers = document.querySelector('.band-members');
+            if (bandMembers) {
+                bandMembers.parentNode.insertBefore(platinumSection, bandMembers.nextSibling);
+                inserted = true;
+            }
+        }
+        
+        // Try inserting before the store section
+        if (!inserted) {
+            const storeSection = document.getElementById('store-section');
+            if (storeSection) {
+                storeSection.parentNode.insertBefore(platinumSection, storeSection);
+                inserted = true;
+            }
+        }
+        
+        // Last resort - just append it to the main container or body
+        if (!inserted) {
+            const container = document.querySelector('.container') || document.querySelector('main') || document.body;
+            container.appendChild(platinumSection);
+        }
+        
+        // Create a direct link to the platinum section
+        const linkContainer = document.createElement('div');
+        linkContainer.className = 'platinum-link-container';
+        linkContainer.innerHTML = `
+            <button id="platinum-quick-link" class="platinum-quick-link">
+                Platinum Records
+            </button>
+        `;
+        
+        // Insert the link at the top of the page
+        const firstElement = document.querySelector('.container') || document.querySelector('main') || document.body.firstChild;
+        document.body.insertBefore(linkContainer, firstElement);
+        
+        // Add listener to the link
+        document.getElementById('platinum-quick-link').addEventListener('click', () => {
+            platinumSection.scrollIntoView({ behavior: 'smooth' });
+            
+            // Highlight the section briefly
+            platinumSection.classList.add('highlight');
+            setTimeout(() => {
+                platinumSection.classList.remove('highlight');
+            }, 1500);
+        });
+        
+        // Add additional style for the link and highlight
+        const linkStyle = document.createElement('style');
+        linkStyle.textContent = `
+            .platinum-link-container {
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+            }
+            .platinum-quick-link {
+                background-color: #FFD700;
+                color: #333;
+                padding: 5px 10px;
+                border-radius: 4px;
+                border: none;
+                cursor: pointer;
+                font-weight: bold;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            }
+            .platinum-quick-link:hover {
+                background-color: #FFC125;
+            }
+            .highlight {
+                animation: highlight-pulse 1.5s;
+            }
+            @keyframes highlight-pulse {
+                0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.7); }
+                70% { box-shadow: 0 0 0 15px rgba(255, 215, 0, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); }
+            }
+        `;
+        document.head.appendChild(linkStyle);
+        
+        // Add event listeners
+        document.getElementById('go-platinum').addEventListener('click', goPlatinum);
+        document.getElementById('open-platinum-shop').addEventListener('click', togglePlatinumShop);
+        
+        // Make section collapsible
+        const headerElement = platinumSection.querySelector('.section-header');
+        const contentElement = platinumSection.querySelector('.section-content');
+        const toggleBtn = headerElement.querySelector('.toggle-btn');
+        
+        headerElement.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON' && e.target !== toggleBtn) return;
+            
+            const isCurrentlyExpanded = !platinumSection.classList.contains('collapsed');
+            contentElement.style.display = isCurrentlyExpanded ? 'none' : 'block';
+            toggleBtn.textContent = isCurrentlyExpanded ? '►' : '▼';
+            platinumSection.classList.toggle('collapsed', isCurrentlyExpanded);
+            
+            localStorage.setItem('platinum-section-expanded', !isCurrentlyExpanded);
+        });
+        
+        // Initialize based on saved preference
+        const isExpanded = localStorage.getItem('platinum-section-expanded') !== 'false';
+        if (!isExpanded) {
+            contentElement.style.display = 'none';
+            toggleBtn.textContent = '►';
+            platinumSection.classList.add('collapsed');
+        }
     }
     
-    // Create a new interval
-    game.autoPracticeIntervalId = setInterval(() => {
-        // Use studio time multiplier if available
-        const practiceRate = game.upgradeCounts.studioTime > 0 
-            ? game.xpPerPractice * game.autoPracticeRate 
-            : game.xpPerPractice;
-            
-        game.experience += practiceRate;
-        updateUI();
-    }, 1000);
-}
-
-// Add a function to calculate prestige rewards
-function calculatePrestigeRewards() {
-    // Base reward is based on total albums and fame
-    const baseReward = Math.floor(Math.sqrt(game.albums * game.fame / 1000));
+    // Update the potential platinum points display
+    const potentialPoints = calculatePlatinumPoints();
+    const potentialPlatinumElement = document.getElementById('potential-platinum');
+    if (potentialPlatinumElement) {
+        potentialPlatinumElement.textContent = potentialPoints;
+    }
     
-    // Minimum of 1 platinum record
-    return Math.max(1, baseReward);
+    // Update other platinum info
+    const platinumPointsElement = document.getElementById('platinum-points');
+    if (platinumPointsElement) {
+        platinumPointsElement.textContent = game.platinumPoints;
+    }
+    
+    const lifetimePlatinumElement = document.getElementById('lifetime-platinum');
+    if (lifetimePlatinumElement) {
+        lifetimePlatinumElement.textContent = game.lifetimePlatinumPoints;
+    }
+    
+    const platinumMultiplierElement = document.getElementById('platinum-multiplier');
+    if (platinumMultiplierElement) {
+        platinumMultiplierElement.textContent = game.platinumMultiplier.toFixed(2) + 'x';
+    }
+    
+    // Disable the platinum button if fame is too low
+    const goPlatinumBtn = document.getElementById('go-platinum');
+    if (goPlatinumBtn) {
+        goPlatinumBtn.disabled = game.fame < 10000; // Need at least 10,000 fans to go platinum
+        
+        if (game.fame < 10000) {
+            goPlatinumBtn.innerHTML = `Go Platinum (Need 10,000 fans)`;
+        } else {
+            goPlatinumBtn.innerHTML = `Go Platinum (Earn <span id="potential-platinum">${potentialPoints}</span> Points)`;
+        }
+    }
 }
 
-// Add a function to handle prestige (we'll call it "Go Platinum")
+// Function to go platinum (prestige)
 function goPlatinum() {
-    if (game.albums < 50) {
-        addNotification("You need at least 50 albums to Go Platinum!");
+    // Need at least 10,000 fans to go platinum
+    if (game.fame < 10000) {
+        addNotification("You need at least 10,000 fans to go platinum!");
         return;
     }
     
-    if (confirm("Are you sure you want to Go Platinum? You'll reset your progress but gain permanent bonuses!")) {
-        // Calculate rewards
-        const platinumRecordsEarned = calculatePrestigeRewards();
-        game.platinumRecords += platinumRecordsEarned;
-        game.prestigeCount++;
-        
-        // Apply permanent bonuses
-        game.prestigeMultipliers.xpGain = 1 + (game.platinumRecords * 0.1); // +10% per platinum record
-        game.prestigeMultipliers.moneyGain = 1 + (game.platinumRecords * 0.15); // +15% per platinum record
-        game.prestigeMultipliers.fameGain = 1 + (game.platinumRecords * 0.2); // +20% per platinum record
-        
-        // Reset progress but keep prestige stats
-        resetGameForPrestige();
-        
-        addNotification(`You went Platinum! Earned ${platinumRecordsEarned} platinum records. All future progress will be faster!`);
+    // Confirm with the player
+    const pointsToEarn = calculatePlatinumPoints();
+    if (!confirm(`Are you sure you want to Go Platinum? 
+    
+You'll reset your career but earn ${pointsToEarn} Platinum Points!
+
+Your current stats:
+- Fans: ${Math.floor(game.fame).toLocaleString()}
+- Albums: ${game.albums}
+- Money: $${Math.floor(game.money).toLocaleString()}
+- Tour Level: ${game.tourLevel}
+
+All progress except Platinum upgrades will be lost!`)) {
+        return;
+    }
+    
+    // Award platinum points
+    const pointsEarned = calculatePlatinumPoints();
+    game.platinumPoints += pointsEarned;
+    game.lifetimePlatinumPoints += pointsEarned;
+    game.prestigeCount++;
+    
+    // Calculate any fans to retain from the Fan Retention upgrade
+    let fansToRetain = 0;
+    if (game.platinumUpgrades.fanRetention > 0) {
+        const retentionRate = game.platinumUpgrades.fanRetention * 
+                              game.platinumUpgradeDefinitions.fanRetention.baseEffect;
+        fansToRetain = Math.floor(game.fame * retentionRate);
+    }
+    
+    // Save some values for restoration
+    const platinumPoints = game.platinumPoints;
+    const lifetimePlatinum = game.lifetimePlatinumPoints;
+    const prestigeCount = game.prestigeCount;
+    const platinumUpgrades = { ...game.platinumUpgrades };
+    
+    // Reset game state
+    resetGameCore();
+    
+    // Restore platinum values
+    game.platinumPoints = platinumPoints;
+    game.lifetimePlatinumPoints = lifetimePlatinum;
+    game.prestigeCount = prestigeCount;
+    game.platinumUpgrades = platinumUpgrades;
+    game.fame = fansToRetain;
+    
+    // Apply any "early bird" bonuses
+    if (game.platinumUpgrades.earlyBird > 0) {
+        const bonus = game.platinumUpgrades.earlyBird;
+        game.albums += bonus;
+        game.money += 1000 * bonus;
+    }
+    
+    // Calculate new platinum multiplier based on lifetime points
+    game.platinumMultiplier = 1 + (game.lifetimePlatinumPoints * 0.05); // +5% per lifetime point
+    
+    // Apply the multiplier to base stats
+    applyPlatinumBonuses();
+    
+    // Update UI
+    updateUI();
+    initializePlatinumShop();
+    
+    addNotification(`You've gone Platinum! Earned ${pointsEarned} Platinum Points. Your career has been reset with permanent bonuses!`);
+}
+
+// Function to apply platinum bonuses to stats
+function applyPlatinumBonuses() {
+    // Apply multipliers from platinum upgrades
+    const goldenTouchBonus = 1 + (game.platinumUpgrades.goldenTouch * 
+                             game.platinumUpgradeDefinitions.goldenTouch.baseEffect);
+    
+    const fastLearnerBonus = 1 + (game.platinumUpgrades.fastLearner * 
+                             game.platinumUpgradeDefinitions.fastLearner.baseEffect);
+    
+    const hitMakerBonus = 1 + (game.platinumUpgrades.hitMaker * 
+                           game.platinumUpgradeDefinitions.hitMaker.baseEffect);
+    
+    // Apply to base stats
+    game.xpPerPractice = Math.max(1, Math.floor(game.xpPerPractice * fastLearnerBonus));
+    game.albumValue = Math.max(5, Math.floor(game.albumValue * hitMakerBonus));
+    
+    // Money multiplier is applied in updateSalesRate
+}
+
+// Function to reset the core game without touching platinum
+function resetGameCore() {
+    // Clear intervals
+    clearInterval(game.gameLoopIntervalId);
+    clearInterval(game.autoSaveIntervalId);
+    clearInterval(game.checkCollabIntervalId);
+    if (game.autoPracticeIntervalId) {
+        clearInterval(game.autoPracticeIntervalId);
+    }
+    if (game.collabIntervalId) {
+        clearInterval(game.collabIntervalId);
+    }
+    
+    // Reset game state - keep only platinum-related properties
+    const tempProps = {
+        platinumPoints: game.platinumPoints,
+        lifetimePlatinumPoints: game.lifetimePlatinumPoints,
+        prestigeCount: game.prestigeCount,
+        platinumUpgrades: {...game.platinumUpgrades},
+        platinumMultiplier: game.platinumMultiplier,
+        platinumUpgradeDefinitions: {...game.platinumUpgradeDefinitions}
+    };
+    
+    // Reset to initial values
+    Object.assign(game, {
+        experience: 0,
+        albums: 0,
+        money: 0,
+        fame: 0,
+        fans: 0,
+        totalAlbumsSold: 0,
+        socialMediaLevel: 0,
+        socialMediaCost: 100,
+        xpPerPractice: 1,
+        albumValue: 5,
+        salesPerSecond: 0,
+        salesMultiplier: 1,
+        hasBetterGuitar: false,
+        hasRecordingEquipment: false,
+        hasMarketing: false,
+        hasStudioTime: false,
+        hasProducer: false,
+        isCollabActive: false,
+        collabMultiplier: 1,
+        collabTimeLeft: 0,
+        collabIntervalId: null,
+        baseAlbumCost: 100,
+        albumCostMultiplier: 1.5,
+        currentAlbumCost: 100,
+        currentGenre: "Folk",
+        unlockedGenres: ["Folk"],
+        tourLevel: 0,
+        baseTourAlbumCost: 5,
+        tourAlbumCostMultiplier: 1.3,
+        currentTourAlbumCost: 5,
+        baseTourMoneyCost: 5000,
+        tourMoneyCostMultiplier: 1.5,
+        currentTourMoneyCost: 5000,
+        hasDrummer: false,
+        hasBassist: false,
+        hasKeyboardist: false,
+        upgradeCounts: {
+            betterGuitar: 0,
+            recordingEquipment: 0,
+            marketing: 0,
+            studioTime: 0,
+            producer: 0
+        },
+        currentUpgradeCosts: {
+            betterGuitar: 50,
+            recordingEquipment: 200,
+            marketing: 500,
+            studioTime: 1000,
+            producer: 3000
+        },
+        autoPracticeRate: 1,
+        hasMetronome: false
+    });
+    
+    // Restore platinum properties
+    Object.assign(game, tempProps);
+    
+    // Restart intervals
+    game.gameLoopIntervalId = setInterval(gameLoop, 1000);
+    game.autoSaveIntervalId = setInterval(saveGame, 30000);
+    game.checkCollabIntervalId = setInterval(checkForCollabOpportunity, 60000);
+    
+    // Clear DOM elements
+    document.querySelector('.genres-container').innerHTML = `
+        <div class="genre-item">
+            <button class="genre-btn active">Folk (Default)</button>
+        </div>
+    `;
+    
+    // Re-initialize UI components
+    updateUI();
+}
+
+// Toggle platinum shop visibility
+function togglePlatinumShop() {
+    const platinumShop = document.getElementById('platinum-shop');
+    if (platinumShop.classList.contains('hidden')) {
+        platinumShop.classList.remove('hidden');
+        initializePlatinumShop();
+    } else {
+        platinumShop.classList.add('hidden');
     }
 }
 
-// Add a function to reset the game for prestige
-function resetGameForPrestige() {
-    // Similar to resetGame() but preserve prestige-related properties
+// Initialize the platinum shop
+function initializePlatinumShop() {
+    const platinumShop = document.getElementById('platinum-shop');
+    if (!platinumShop) return;
     
-    // Store prestige values
-    const prestigeCount = game.prestigeCount;
-    const platinumRecords = game.platinumRecords;
-    const prestigeMultipliers = {...game.prestigeMultipliers};
+    platinumShop.innerHTML = `
+        <h3>Platinum Shop</h3>
+        <p>You have <span id="shop-platinum-points">${game.platinumPoints}</span> Platinum Points to spend</p>
+        <div class="platinum-upgrades"></div>
+    `;
     
-    // Reset everything
-    resetGame(false); // Pass false to not show confirmation dialog
+    const upgradesContainer = platinumShop.querySelector('.platinum-upgrades');
     
-    // Restore prestige values
-    game.prestigeCount = prestigeCount;
-    game.platinumRecords = platinumRecords;
-    game.prestigeMultipliers = prestigeMultipliers;
+    // Add each upgrade
+    const upgrades = [
+        {
+            id: 'fanRetention',
+            name: 'Fan Retention',
+            description: 'Keep some of your fans when going platinum',
+            effectText: 'Keep 5% of fans per level when going platinum'
+        },
+        {
+            id: 'earlyBird',
+            name: 'Early Bird',
+            description: 'Start with some albums and money after going platinum',
+            effectText: 'Start with +1 album and $1,000 per level'
+        },
+        {
+            id: 'goldenTouch',
+            name: 'Golden Touch',
+            description: 'All money gains are increased',
+            effectText: '+10% money gained per level'
+        },
+        {
+            id: 'fastLearner',
+            name: 'Fast Learner',
+            description: 'Gain more XP from practicing',
+            effectText: '+15% XP from practice per level'
+        },
+        {
+            id: 'hitMaker',
+            name: 'Hit Maker',
+            description: 'Your albums are worth more',
+            effectText: '+20% album value per level'
+        },
+        {
+            id: 'tourManager',
+            name: 'Tour Manager',
+            description: 'Better rewards from touring',
+            effectText: '+25% fame and money from tours per level'
+        }
+    ];
     
-    // Apply prestige bonuses to starting values
-    game.xpPerPractice = 1 * game.prestigeMultipliers.xpGain;
-    game.albumValue = 5 * game.prestigeMultipliers.moneyGain;
+    upgrades.forEach(upgrade => {
+        const currentLevel = game.platinumUpgrades[upgrade.id];
+        const nextCost = calculatePlatinumUpgradeCost(upgrade.id);
+        
+        const upgradeElement = document.createElement('div');
+        upgradeElement.className = 'platinum-upgrade';
+        upgradeElement.innerHTML = `
+            <div class="upgrade-info">
+                <h4>${upgrade.name}</h4>
+                <p>${upgrade.description}</p>
+                <p class="effect">${upgrade.effectText}</p>
+                <p class="level">Level: ${currentLevel}</p>
+            </div>
+            <button class="buy-platinum-upgrade" data-upgrade="${upgrade.id}" 
+                    ${game.platinumPoints < nextCost ? 'disabled' : ''}>
+                Buy (${nextCost} PP)
+            </button>
+        `;
+        
+        upgradesContainer.appendChild(upgradeElement);
+    });
     
-    updateUI();
+    // Add event listeners to buy buttons
+    const buyButtons = platinumShop.querySelectorAll('.buy-platinum-upgrade');
+    buyButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const upgradeId = button.getAttribute('data-upgrade');
+            buyPlatinumUpgrade(upgradeId);
+        });
+    });
+}
+
+// Calculate the cost of the next level of a platinum upgrade
+function calculatePlatinumUpgradeCost(upgradeId) {
+    const upgradeDefinition = game.platinumUpgradeDefinitions[upgradeId];
+    const currentLevel = game.platinumUpgrades[upgradeId];
+    
+    return Math.floor(upgradeDefinition.baseCost * 
+                    Math.pow(upgradeDefinition.costMultiplier, currentLevel));
+}
+
+// Buy a platinum upgrade
+function buyPlatinumUpgrade(upgradeId) {
+    const cost = calculatePlatinumUpgradeCost(upgradeId);
+    
+    if (game.platinumPoints >= cost) {
+        game.platinumPoints -= cost;
+        game.platinumUpgrades[upgradeId]++;
+        
+        // Apply immediate effects if needed
+        applyPlatinumBonuses();
+        
+        // Update UI
+        updateUI();
+        initializePlatinumShop(); // Refresh the shop
+        
+        addNotification(`Purchased ${upgradeId} platinum upgrade! Now at level ${game.platinumUpgrades[upgradeId]}.`);
+    } else {
+        addNotification("Not enough Platinum Points!");
+    }
 }
 
 // Initialize the game when the page loads
@@ -1566,10 +2183,23 @@ function fixStoreInteractivity() {
 
 // Enhanced updateStoreButtons function to also update text content
 function updateStoreButtons() {
+    // First check which items should be unlocked based on game progress
+    const shouldUnlockBetterGuitar = game.albums >= 3;
+    const shouldUnlockRecordingEquipment = game.albums >= 5;
+    const shouldUnlockMarketing = game.upgradeCounts.recordingEquipment > 0;
+    const shouldUnlockStudioTime = game.upgradeCounts.marketing > 0;
+    const shouldUnlockProducer = game.upgradeCounts.studioTime > 0;
+    
     // Update Better Guitar button
     if (domElements.betterGuitarBtn) {
         const betterGuitarCost = game.currentUpgradeCosts.betterGuitar;
-        domElements.betterGuitarBtn.disabled = game.money < betterGuitarCost;
+        // The button should be enabled if it's unlocked AND player has enough money
+        const isUnlocked = shouldUnlockBetterGuitar;
+        const canAfford = game.money >= betterGuitarCost;
+        
+        // If it's not unlocked yet, it should be disabled regardless of money
+        // If it's unlocked, it should be enabled only if player can afford it
+        domElements.betterGuitarBtn.disabled = !isUnlocked || !canAfford;
         
         domElements.betterGuitarBtn.innerHTML = `
             Better Guitar ($${betterGuitarCost.toLocaleString()}) <br>
@@ -1581,7 +2211,10 @@ function updateStoreButtons() {
     // Update Recording Equipment button
     if (domElements.recordingEquipmentBtn) {
         const recordingEquipmentCost = game.currentUpgradeCosts.recordingEquipment;
-        domElements.recordingEquipmentBtn.disabled = game.money < recordingEquipmentCost;
+        const isUnlocked = shouldUnlockRecordingEquipment;
+        const canAfford = game.money >= recordingEquipmentCost;
+        
+        domElements.recordingEquipmentBtn.disabled = !isUnlocked || !canAfford;
         
         domElements.recordingEquipmentBtn.innerHTML = `
             Recording Equipment ($${recordingEquipmentCost.toLocaleString()}) <br>
@@ -1593,8 +2226,10 @@ function updateStoreButtons() {
     // Update Marketing button
     if (domElements.marketingBtn) {
         const marketingCost = game.currentUpgradeCosts.marketing;
-        const isDisabled = game.money < marketingCost || (game.upgradeCounts.recordingEquipment === 0);
-        domElements.marketingBtn.disabled = isDisabled;
+        const isUnlocked = shouldUnlockMarketing;
+        const canAfford = game.money >= marketingCost;
+        
+        domElements.marketingBtn.disabled = !isUnlocked || !canAfford;
         
         domElements.marketingBtn.innerHTML = `
             Marketing Campaign ($${marketingCost.toLocaleString()}) <br>
@@ -1606,8 +2241,10 @@ function updateStoreButtons() {
     // Update Studio Time button
     if (domElements.studioTimeBtn) {
         const studioTimeCost = game.currentUpgradeCosts.studioTime;
-        const isDisabled = game.money < studioTimeCost || !game.hasMetronome || (game.upgradeCounts.marketing === 0);
-        domElements.studioTimeBtn.disabled = isDisabled;
+        const isUnlocked = shouldUnlockStudioTime && game.hasMetronome;
+        const canAfford = game.money >= studioTimeCost;
+        
+        domElements.studioTimeBtn.disabled = !isUnlocked || !canAfford;
         
         domElements.studioTimeBtn.innerHTML = `
             Studio Time ($${studioTimeCost.toLocaleString()}) <br>
@@ -1619,21 +2256,22 @@ function updateStoreButtons() {
     // Update Producer button
     if (domElements.producerBtn) {
         const producerCost = game.currentUpgradeCosts.producer;
-        const isDisabled = game.hasProducer || 
-                          game.money < producerCost || 
-                          (game.upgradeCounts.studioTime === 0);
-        domElements.producerBtn.disabled = isDisabled;
+        const isUnlocked = shouldUnlockProducer;
+        const canAfford = game.money >= producerCost;
+        
+        domElements.producerBtn.disabled = !isUnlocked || !canAfford;
         
         domElements.producerBtn.innerHTML = `
             Hire Producer ($${producerCost.toLocaleString()}) <br>
-            <small>Albums worth 2x more</small>
-            <div class="upgrade-level">${game.hasProducer ? 'Hired' : 'Not Hired'}</div>
+            <small>Album value +50% per level</small>
+            <div class="upgrade-level">Level: ${game.upgradeCounts.producer}</div>
         `;
     }
     
     // Update Metronome button if it exists
     if (domElements.metronomeBtn) {
-        domElements.metronomeBtn.disabled = game.hasMetronome || game.money < game.metronomeBaseCost;
+        const canAfford = game.money >= game.metronomeBaseCost;
+        domElements.metronomeBtn.disabled = game.hasMetronome || !canAfford;
         
         domElements.metronomeBtn.innerHTML = `
             Metronome ($${game.metronomeBaseCost}) <br>
@@ -1644,4 +2282,204 @@ function updateStoreButtons() {
     
     // Update record album button text
     domElements.recordAlbumBtn.textContent = `Record Album (${Math.floor(game.currentAlbumCost)} XP)`;
-} 
+}
+
+// Create a dedicated function to start auto-practice
+function startAutoPractice() {
+    // Clear any existing interval first to prevent duplicates
+    if (game.autoPracticeIntervalId) {
+        clearInterval(game.autoPracticeIntervalId);
+    }
+    
+    // Create a new interval
+    game.autoPracticeIntervalId = setInterval(() => {
+        // Calculate base practice rate with studio time multiplier if available
+        let practiceRate = game.upgradeCounts.studioTime > 0 
+            ? game.xpPerPractice * game.autoPracticeRate 
+            : game.xpPerPractice;
+            
+        // Apply Fast Learner platinum upgrade if purchased
+        if (game.platinumUpgrades.fastLearner > 0) {
+            const fastLearnerBonus = 1 + (game.platinumUpgrades.fastLearner * 
+                                    game.platinumUpgradeDefinitions.fastLearner.baseEffect);
+            practiceRate *= fastLearnerBonus;
+        }
+        
+        // Apply platinum multiplier
+        practiceRate *= game.platinumMultiplier;
+        
+        // Add XP (rounded to prevent fractional XP)
+        game.experience += Math.floor(practiceRate);
+        updateUI();
+    }, 1000);
+}
+
+// Add platinum styles to ensure the section is visible
+function addPlatinumStyles() {
+    // Check if styles are already added
+    if (document.getElementById('platinum-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'platinum-styles';
+    style.textContent = `
+        .platinum-section {
+            margin: 20px auto;
+            padding: 15px;
+            border: 2px solid #FFD700;
+            border-radius: 8px;
+            background-color: #FFFAF0;
+            max-width: 600px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .platinum-section .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+        .platinum-section h2 {
+            color: #996515;
+            margin: 0;
+        }
+        .platinum-description {
+            font-style: italic;
+            color: #555;
+        }
+        .platinum-info {
+            background-color: #FFF8DC;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .platinum-info p {
+            margin: 5px 0;
+        }
+        .platinum-btn {
+            background-color: #FFD700;
+            color: #333;
+            padding: 10px 20px;
+            margin-top: 10px;
+            font-weight: bold;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .platinum-btn:hover:not([disabled]) {
+            background-color: #FFC125;
+        }
+        .platinum-btn:disabled {
+            background-color: #E6E6E6;
+            color: #999;
+            cursor: not-allowed;
+        }
+        .platinum-shop-btn {
+            background-color: #C0C0C0;
+            color: #333;
+            padding: 10px 20px;
+            margin-left: 10px;
+            font-weight: bold;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .platinum-shop-btn:hover {
+            background-color: #A9A9A9;
+        }
+        .platinum-shop {
+            margin-top: 15px;
+            padding: 10px;
+            border: 1px solid #DDD;
+            border-radius: 4px;
+            background-color: #FFF;
+        }
+        .platinum-shop h3 {
+            color: #996515;
+            border-bottom: 1px solid #FFD700;
+            padding-bottom: 5px;
+        }
+        .platinum-shop.hidden {
+            display: none;
+        }
+        .platinum-upgrades {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+        @media (min-width: 768px) {
+            .platinum-upgrades {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        .platinum-upgrade {
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            border: 1px solid #EEE;
+            border-radius: 4px;
+            background-color: #FAFAFA;
+        }
+        .upgrade-info {
+            flex: 1;
+        }
+        .platinum-upgrade h4 {
+            margin: 0 0 5px 0;
+            color: #996515;
+        }
+        .platinum-upgrade p {
+            margin: 3px 0;
+            font-size: 0.9em;
+        }
+        .platinum-upgrade .effect {
+            font-weight: bold;
+            color: #4682B4;
+        }
+        .platinum-upgrade .level {
+            font-weight: bold;
+            color: #996515;
+        }
+        .buy-platinum-upgrade {
+            background-color: #FFD700;
+            color: #333;
+            padding: 8px 15px;
+            margin-top: 10px;
+            font-weight: bold;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            align-self: flex-end;
+        }
+        .buy-platinum-upgrade:hover:not([disabled]) {
+            background-color: #FFC125;
+        }
+        .buy-platinum-upgrade:disabled {
+            background-color: #E6E6E6;
+            color: #999;
+            cursor: not-allowed;
+        }
+    `;
+    
+    document.head.appendChild(style);
+}
+
+// Social Media function
+function makePost() {
+    console.log("makePost function called");
+    if (game.experience >= game.socialMediaCost) {
+        game.experience -= game.socialMediaCost;
+        game.socialMediaLevel++;
+        
+        // Update the cost for the next level (1.5x multiplier, similar to album cost)
+        game.socialMediaCost = Math.floor(100 * Math.pow(1.5, game.socialMediaLevel));
+        
+        addNotification(`You made a social media post! Fan gain increased by 1%`);
+        
+        // Log the action for debugging
+        console.log(`Social media post made. New level: ${game.socialMediaLevel}, Next cost: ${game.socialMediaCost}`);
+        
+        updateUI();
+    } else {
+        console.log(`Not enough XP. Have: ${game.experience}, Need: ${game.socialMediaCost}`);
+    }
+}
